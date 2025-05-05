@@ -23,7 +23,7 @@ def trigger_action(label):
 
     response = actions.get(label, f"Unrecognized object: {label}.")
     print(response)
-    git add requirements.txt
+    #git add requirements.txt
     git commit -m "Add OpenCV to requirements"
     git push
     #engine.say(response)
