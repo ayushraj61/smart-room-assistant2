@@ -1,14 +1,16 @@
 from ultralytics import YOLO
+from gtts import gTTs
+import os
 import cv2
-import pyttsx3
+#import pyttsx3
 import threading
 
 # Load the YOLOv8 model
 model = YOLO("yolov8n.pt")  # Ensure the correct model path (change if needed)
 
 # AI voice engine setup
-engine = pyttsx3.init()
-engine.setProperty('rate', 150)
+#engine = pyttsx3.init()
+#engine.setProperty('rate', 150)
 
 def trigger_action(label):
     actions = {
@@ -21,8 +23,11 @@ def trigger_action(label):
 
     response = actions.get(label, f"Unrecognized object: {label}.")
     print(response)
-    engine.say(response)
-    engine.runAndWait()
+    git add requirements.txt
+    git commit -m "Add OpenCV to requirements"
+    git push
+    #engine.say(response)
+    #engine.runAndWait()
 
 def detect_from_webcam():
     cap = cv2.VideoCapture(0)
