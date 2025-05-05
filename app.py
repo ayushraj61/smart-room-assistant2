@@ -1,5 +1,5 @@
 from ultralytics import YOLO
-from gtts import gTTs
+from gtts import gTTs as gtts
 import os
 import cv2
 #import pyttsx3
