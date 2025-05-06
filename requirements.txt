@@ -5,6 +5,12 @@ streamlit
 torch
 Pillow
 numpy
+streamlit
+ultralytics
+opencv-python
+numpy
+gTTS
+
 
 
 
