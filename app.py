@@ -1,83 +1,73 @@
+import streamlit as st
 from ultralytics import YOLO
-from gtts import gTTS 
+import tempfile
 import os
-os.environ["STREAMLIT_WATCHER_TYPE"] = "none"
+from gtts import gTTS
+from PIL import Image
 import cv2
-#import pyttsx3
-import threading
-import torch
-import torch.nn as nn
+import numpy as np
 
-class MyModel(nn.Module):
-    def __init__(self):
-        super(MyModel, self).__init__()
-        # model layers...
+# Set Streamlit page title
+st.set_page_config(page_title="Smart Room Assistant", layout="centered")
 
-    def forward(self, x):
-        return x  # actual forward logic
+# Title
+st.title("🧠 Smart Room Assistant")
+st.write("Upload an image to detect objects and trigger smart responses.")
 
-# Now load model
-model = torch.load("model.pth", map_location=torch.device('cpu'))
-model.eval()
+# Load YOLOv8 model
+model = YOLO("yolov8n.pt")
 
+# Action responses
+ACTIONS = {
+    "laptop": "Launching work mode.",
+    "bed": "Time to rest. Activating sleep assistant.",
+    "chair": "Ergonomic check: Sit upright!",
+    "tv": "Entertainment mode ready.",
+    "bottle": "Stay hydrated! Drink some water.",
+}
 
-# Load the YOLOv8 model
-model = YOLO("yolov8n.pt")  # Ensure the correct model path (change if needed)
+def speak(text, lang="en"):
+    """Convert text to speech and play it."""
+    tts = gTTS(text=text, lang=lang)
+    temp_audio = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+    tts.save(temp_audio.name)
+    audio_file = open(temp_audio.name, "rb")
+    audio_bytes = audio_file.read()
+    st.audio(audio_bytes, format="audio/mp3")
+    audio_file.close()
+    os.remove(temp_audio.name)
 
-# AI voice engine setup
-#engine = pyttsx3.init()
-#engine.setProperty('rate', 150)
+# Image uploader
+uploaded_file = st.file_uploader("Choose an image", type=["jpg", "jpeg", "png"])
 
-def trigger_action(label):
-    actions = {
-        "laptop": "Launching work mode.",
-        "bed": "Time to rest. Activating sleep assistant.",
-        "chair": "Ergonomic check: Sit upright!",
-        "tv": "Entertainment mode ready.",
-        "bottle": "Stay hydrated! Drink some water.",
-    }
+if uploaded_file:
+    # Load image
+    image = Image.open(uploaded_file).convert("RGB")
+    st.image(image, caption="Uploaded Image", use_column_width=True)
 
-    response = actions.get(label, f"Unrecognized object: {label}.")
-    print(response)
-    #git add requirements.txt
-    #git commit -m "Add OpenCV to requirements"
-    #git push
-    #engine.say(response)
-    #engine.runAndWait()
+    # Convert image to OpenCV format
+    img_cv = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
 
-def detect_from_webcam():
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        print("Error: Could not open webcam.")
-        return
+    # Run YOLO detection
+    results = model(img_cv)
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+    # Annotate detections
+    annotated_img = results[0].plot()
 
-        # Detect objects using YOLOv8
-        results = model(frame)
-        annotated_frame = results[0].plot()
+    # Show annotated image
+    st.image(annotated_img, caption="Detected Objects", use_column_width=True)
 
-        for result in results.pred[0]:
-            label_idx = int(result[5])  # Get the predicted class index
-            label = model.names[label_idx]  # Get the corresponding label
-            trigger_action(label)
+    detected_labels = set()
 
-        # Show the annotated frame
-        cv2.imshow("Smart Room Assistant", annotated_frame)
-        
-        # Check if the user pressed 'q' to quit the webcam feed
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'):
-            break
+    # Get detected object labels
+    for r in results:
+        for box in r.boxes:
+            cls_id = int(box.cls[0].item())
+            label = model.names[cls_id]
+            detected_labels.add(label)
 
-    cap.release()
-    cv2.destroyAllWindows()
-
-def start_detection_thread():
-    """Start the detection in a separate thread to avoid UI freezing"""
-    thread = threading.Thread(target=detect_from_webcam)
-    thread.start()
-
+    # Show and speak responses
+    for label in detected_labels:
+        response = ACTIONS.get(label, f"Unrecognized object: {label}.")
+        st.write(f"**{label.capitalize()}** detected → {response}")
+        speak(response)
