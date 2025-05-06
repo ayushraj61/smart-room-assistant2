@@ -1,76 +1,67 @@
+
 import streamlit as st
 from ultralytics import YOLO
 import cv2
-import numpy as np
-from gtts import gTTS
-import os
-import tempfile
 import time
 
+# Set Streamlit page configuration
+st.set_page_config(page_title="Smart Room Assistant", layout="centered")
+
 # Load YOLOv8 model
-model = YOLO("yolov8n.pt")
+model = YOLO("yolov8n.pt")  # Ensure this model file is present
 
-ACTIONS = {
-    "laptop": "Launching work mode.",
-    "bed": "Time to rest. Activating sleep assistant.",
-    "chair": "Ergonomic check: Sit upright!",
-    "tv": "Entertainment mode ready.",
-    "bottle": "Stay hydrated! Drink some water.",
-}
+# Function to trigger a chatbot response
+def trigger_chatbot(detected_classes):
+    if "person" in detected_classes:
+        return "👋 Hello! I see someone in the room. How can I assist you?"
+    elif "cell phone" in detected_classes:
+        return "📱 Looks like you're using a phone. Need tech support?"
+    elif "laptop" in detected_classes:
+        return "💻 Working hard or hardly working? Let me know if you need assistance."
+    else:
+        return "✅ No actionable object detected."
 
-st.title("🧠 Smart Room Assistant (Webcam Live Detection)")
+# UI Layout
+st.title("🤖 Smart Room Assistant")
+st.markdown("This assistant detects objects and triggers AI responses based on what it sees.")
 
-start = st.button("Start Camera", key="start_btn")
+start_camera = st.checkbox("Turn On Camera")
 
-def speak(text):
-    tts = gTTS(text)
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
-        tts.save(fp.name)
-        st.audio(fp.name, format="audio/mp3")
+FRAME_WINDOW = st.image([])
 
-if start:
+# Initialize webcam
+cap = None
+if start_camera:
     cap = cv2.VideoCapture(0)
 
     if not cap.isOpened():
-        st.error("Webcam not found.")
+        st.error("❌ Cannot access the webcam.")
     else:
-        st.info("Webcam started. Press STOP to end.")
-        prev_labels = set()
-        FRAME_WINDOW = st.image([])
-        stop_btn = st.button("Stop Camera", key="stop_btn")
+        st.success("✅ Camera is live.")
 
-        while cap.isOpened():
+        while start_camera:
             ret, frame = cap.read()
             if not ret:
-                st.error("Failed to grab frame.")
+                st.warning("⚠️ Failed to grab frame.")
                 break
 
-            # Detect objects
-            results = model(frame)
-            annotated_frame = results[0].plot()
-            annotated_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
-            FRAME_WINDOW.image(annotated_frame)
+            # Run YOLO model
+            results = model(frame)[0]
+            labels = [model.names[int(cls)] for cls in results.boxes.cls]
 
-            # Get labels
-            labels = set()
-            for r in results:
-                for box in r.boxes:
-                    cls = int(box.cls[0].item())
-                    label = model.names[cls]
-                    labels.add(label)
+            # Draw boxes
+            for box in results.boxes:
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                cls_id = int(box.cls[0])
+                label = model.names[cls_id]
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
+                cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
 
-            # Detect new objects
-            new_labels = labels - prev_labels
-            for label in new_labels:
-                message = ACTIONS.get(label, f"{label} detected.")
-                st.write(f"**{label.capitalize()}** → {message}")
-                speak(message)
-                time.sleep(1)
+            # Show webcam image
+            FRAME_WINDOW.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
-            prev_labels = labels
-
-            if stop_btn:
-                break
+            # Trigger chatbot and show response
+            response = trigger_chatbot(labels)
+            st.info(response)
 
         cap.release()
-             
