@@ -5,6 +5,21 @@ os.environ["STREAMLIT_WATCHER_TYPE"] = "none"
 import cv2
 #import pyttsx3
 import threading
+import torch
+import torch.nn as nn
+
+class MyModel(nn.Module):
+    def __init__(self):
+        super(MyModel, self).__init__()
+        # model layers...
+
+    def forward(self, x):
+        return x  # actual forward logic
+
+# Now load model
+model = torch.load("model.pth", map_location=torch.device('cpu'))
+model.eval()
+
 
 # Load the YOLOv8 model
 model = YOLO("yolov8n.pt")  # Ensure the correct model path (change if needed)

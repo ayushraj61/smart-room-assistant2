@@ -2,4 +2,7 @@ ultralytics
 opencv-python-headless
 Pyttsx3
 gTTs
+streamlit
+torch
+
 
