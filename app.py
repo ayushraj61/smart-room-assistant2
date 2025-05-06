@@ -1,6 +1,7 @@
 from ultralytics import YOLO
 from gtts import gTTS 
 import os
+os.environ["STREAMLIT_WATCHER_TYPE"] = "none"
 import cv2
 #import pyttsx3
 import threading
