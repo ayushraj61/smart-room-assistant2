@@ -153,3 +153,4 @@ if st.session_state["detections"]:
     st.dataframe(df)
     csv = df.to_csv(index=False).encode("utf-8")
     st.download_button("Download Log as CSV", data=csv, file_name="detection_log.csv", mime="text/csv")
+
