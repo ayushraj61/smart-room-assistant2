@@ -1,5 +1,33 @@
 import streamlit as st
-import cv2
+import os
+import sys
+
+# Fix for libGL on Streamlit Cloud
+os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "0"
+
+# Install headless cv2 fix
+try:
+    import cv2
+except ImportError:
+    os.system("pip install opencv-python-headless")
+    import cv2
+```
+
+**3. In `requirements.txt`, change line 4 to:**
+```
+opencv-contrib-python-headless
+```
+instead of `opencv-python-headless`
+
+---
+
+Actually the **simplest guaranteed fix** — in `requirements.txt` replace:
+```
+opencv-python-headless==4.7.0.72
+```
+with:
+```
+opencv-python-headless==4.8.1.78
 import numpy as np
 import pandas as pd
 import time
