@@ -1,44 +1,19 @@
-import streamlit as st
 import os
 import sys
 
 # Fix for libGL on Streamlit Cloud
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "0"
 
-# Install headless cv2 fix
-try:
-    import cv2
-except ImportError:
-    os.system("pip install opencv-python-headless")
-    import cv2
-```
-
-**3. In `requirements.txt`, change line 4 to:**
-```
-opencv-contrib-python-headless
-```
-instead of `opencv-python-headless`
-
----
-
-Actually the **simplest guaranteed fix** — in `requirements.txt` replace:
-```
-opencv-python-headless==4.7.0.72
-```
-with:
-```
-opencv-python-headless==4.8.1.78
+import streamlit as st
+import cv2
 import numpy as np
 import pandas as pd
 import time
 from datetime import datetime
 from PIL import Image
-import os
 from ultralytics import YOLO
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
 import av
-import os
-os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "0"
 
 # Streamlit page config
 st.set_page_config(page_title="Smart Room Assistant", layout="wide")
@@ -90,15 +65,12 @@ if input_type == "Image":
         image = Image.open(img).convert("RGB")
         frame = np.array(image)
         st.image(frame, caption="Original", use_column_width=True)
-
         results = model.predict(frame, conf=confidence, iou=iou_thresh, imgsz=img_size)
         annotated = results[0].plot()
         st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB), caption="Detected", use_column_width=True)
-
         class_ids = results[0].boxes.cls.tolist()
         detected = [class_names[int(i)] for i in class_ids]
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-
         for obj in set(detected):
             if filter_classes and obj not in filter_classes:
                 continue
@@ -107,7 +79,6 @@ if input_type == "Image":
             st.session_state["detections"].append({
                 "object": obj, "timestamp": timestamp, "snapshot_file": snap_file
             })
-
         st.session_state["last_frame"] = annotated
 
 # Video detection
@@ -117,22 +88,18 @@ elif input_type == "Video":
         with open("temp_video.mp4", "wb") as f:
             f.write(vid.read())
         cap = cv2.VideoCapture("temp_video.mp4")
-
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
             frame = cv2.resize(frame, (640, 480))
             st.session_state["last_frame"] = frame.copy()
-
             results = model.predict(frame, conf=confidence, iou=iou_thresh, imgsz=img_size)
             annotated = results[0].plot()
-
             boxes = results[0].boxes
             class_ids = boxes.cls.tolist()
             detected = [class_names[int(i)] for i in class_ids]
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-
             for obj in set(detected):
                 if filter_classes and obj not in filter_classes:
                     continue
@@ -141,14 +108,12 @@ elif input_type == "Video":
                 st.session_state["detections"].append({
                     "object": obj, "timestamp": timestamp, "snapshot_file": snap_file
                 })
-
             frame_display.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB))
         cap.release()
 
 # Webcam detection using webrtc
 elif input_type == "Webcam":
     st.info("Enable webcam access in browser. Use Chrome/Firefox.")
-
     width, height = map(int, res_option.split("x"))
 
     class YOLOProcessor(VideoProcessorBase):
@@ -158,14 +123,11 @@ elif input_type == "Webcam":
         def recv(self, frame):
             img = frame.to_ndarray(format="bgr24")
             img = cv2.resize(img, (width, height))
-
             results = self.model.predict(img, conf=confidence, iou=iou_thresh, imgsz=img_size)
-
             if results and results[0].boxes:
                 annotated = results[0].plot()
             else:
                 annotated = img
-
             st.session_state["last_frame"] = annotated
             return av.VideoFrame.from_ndarray(annotated, format="bgr24")
 
@@ -183,4 +145,3 @@ if st.session_state["detections"]:
     st.dataframe(df)
     csv = df.to_csv(index=False).encode("utf-8")
     st.download_button("Download Log as CSV", data=csv, file_name="detection_log.csv", mime="text/csv")
-
