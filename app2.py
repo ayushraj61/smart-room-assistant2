@@ -9,6 +9,8 @@ import os
 from ultralytics import YOLO
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
 import av
+import os
+os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "0"
 
 # Streamlit page config
 st.set_page_config(page_title="Smart Room Assistant", layout="wide")
