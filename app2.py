@@ -16,8 +16,50 @@ from collections import defaultdict
 try:
     import face_recognition
     FACE_RECOGNITION_AVAILABLE = True
+    FACE_BACKEND = "dlib"
 except ImportError:
     FACE_RECOGNITION_AVAILABLE = False
+    FACE_BACKEND = None
+
+# ─── OpenCV DNN Face Detection/Recognition Fallback ───
+OPENCV_FACE_MODELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "face_models")
+
+def _download_opencv_face_models():
+    """Download OpenCV face detection and recognition ONNX models if not present."""
+    import urllib.request
+    os.makedirs(OPENCV_FACE_MODELS_DIR, exist_ok=True)
+    models = {
+        "face_detection_yunet_2023mar.onnx": "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+        "face_recognition_sface_2021dec.onnx": "https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx",
+    }
+    for fname, url in models.items():
+        fpath = os.path.join(OPENCV_FACE_MODELS_DIR, fname)
+        if not os.path.exists(fpath):
+            try:
+                urllib.request.urlretrieve(url, fpath)
+            except Exception as e:
+                return False
+    return True
+
+@st.cache_resource
+def load_opencv_face_models():
+    """Load OpenCV FaceDetectorYN and FaceRecognizerSF."""
+    if not _download_opencv_face_models():
+        return None, None
+    det_path = os.path.join(OPENCV_FACE_MODELS_DIR, "face_detection_yunet_2023mar.onnx")
+    rec_path = os.path.join(OPENCV_FACE_MODELS_DIR, "face_recognition_sface_2021dec.onnx")
+    try:
+        detector = cv2.FaceDetectorYN.create(det_path, "", (320, 320), 0.7, 0.3, 5000)
+        recognizer = cv2.FaceRecognizerSF.create(rec_path, "")
+        return detector, recognizer
+    except Exception:
+        return None, None
+
+if not FACE_RECOGNITION_AVAILABLE:
+    _cv_face_detector, _cv_face_recognizer = load_opencv_face_models()
+    if _cv_face_detector is not None:
+        FACE_RECOGNITION_AVAILABLE = True
+        FACE_BACKEND = "opencv"
 
 # ─── Page Config ───
 st.set_page_config(page_title="Smart Room Assistant", layout="wide")
@@ -75,68 +117,121 @@ def get_face_db():
         mtime = 0
     return get_face_db_cached(mtime)
 
+def _opencv_detect_faces(image_rgb):
+    """Detect faces using OpenCV DNN. Returns list of (top, right, bottom, left) and aligned faces."""
+    h, w = image_rgb.shape[:2]
+    _cv_face_detector.setInputSize((w, h))
+    img_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
+    _, faces = _cv_face_detector.detect(img_bgr)
+    if faces is None:
+        return [], [], img_bgr
+    locations = []
+    for face in faces:
+        x, y, fw, fh = int(face[0]), int(face[1]), int(face[2]), int(face[3])
+        top, right, bottom, left = y, x + fw, y + fh, x
+        locations.append((top, right, bottom, left))
+    return locations, faces, img_bgr
+
+def _opencv_encode_face(img_bgr, face_raw):
+    """Get 128-dim face embedding using OpenCV FaceRecognizerSF."""
+    aligned = _cv_face_recognizer.alignCrop(img_bgr, face_raw)
+    return _cv_face_recognizer.feature(aligned).flatten()
+
 def register_face(name, image_rgb):
     """Register a face from an RGB image. Returns (success, message)."""
-    face_locations = face_recognition.face_locations(image_rgb, model="hog")
-    if len(face_locations) == 0:
-        return False, "No face detected in this image."
-    if len(face_locations) > 1:
-        return False, f"Multiple faces ({len(face_locations)}) detected. Please use an image with only one face."
-
-    encodings = face_recognition.face_encodings(image_rgb, face_locations)
-    if len(encodings) == 0:
-        return False, "Could not encode face. Try a clearer image."
+    if FACE_BACKEND == "dlib":
+        face_locations = face_recognition.face_locations(image_rgb, model="hog")
+        if len(face_locations) == 0:
+            return False, "No face detected in this image."
+        if len(face_locations) > 1:
+            return False, f"Multiple faces ({len(face_locations)}) detected. Please use an image with only one face."
+        encodings = face_recognition.face_encodings(image_rgb, face_locations)
+        if len(encodings) == 0:
+            return False, "Could not encode face. Try a clearer image."
+        encoding = encodings[0]
+        top, right, bottom, left = face_locations[0]
+    else:
+        locations, faces_raw, img_bgr = _opencv_detect_faces(image_rgb)
+        if len(locations) == 0:
+            return False, "No face detected in this image."
+        if len(locations) > 1:
+            return False, f"Multiple faces ({len(locations)}) detected. Please use an image with only one face."
+        encoding = _opencv_encode_face(img_bgr, faces_raw[0])
+        top, right, bottom, left = locations[0]
 
     db = load_face_db()
     if name not in db:
         db[name] = []
-    db[name].append(encodings[0])
+    db[name].append(encoding)
     save_face_db(db)
 
     # Save the face image for reference
     face_img_path = os.path.join(FACES_DIR, f"{name}_{len(db[name])}.jpg")
-    top, right, bottom, left = face_locations[0]
     face_crop = image_rgb[top:bottom, left:right]
     Image.fromarray(face_crop).save(face_img_path)
 
     return True, f"Face registered for '{name}' ({len(db[name])} image(s) total)."
 
+def _match_encoding(encoding, known_encodings, known_names):
+    """Match a face encoding against known encodings. Works for both backends."""
+    if FACE_BACKEND == "dlib":
+        distances = face_recognition.face_distance(known_encodings, encoding)
+        if len(distances) > 0:
+            best_idx = np.argmin(distances)
+            best_distance = distances[best_idx]
+            if best_distance <= FACE_MATCH_TOLERANCE:
+                return known_names[best_idx], 1.0 - best_distance
+    else:
+        # OpenCV: use cosine similarity (higher = better match)
+        best_score = 0
+        best_name = None
+        for i, known_enc in enumerate(known_encodings):
+            score = _cv_face_recognizer.match(
+                encoding.reshape(1, -1).astype(np.float32),
+                known_enc.reshape(1, -1).astype(np.float32),
+                cv2.FaceRecognizerSF_FR_COSINE
+            )
+            if score > best_score:
+                best_score = score
+                best_name = known_names[i]
+        if best_score >= 0.363:  # OpenCV recommended cosine threshold
+            return best_name, best_score
+    return "Unknown", 0.0
+
 def recognize_faces_in_frame(frame_rgb):
-    """Find and recognize faces in a frame. Returns list of (name, location, distance)."""
+    """Find and recognize faces in a frame. Returns list of (name, location, confidence)."""
     db = get_face_db()
     if not db:
         return []
-
-    face_locations = face_recognition.face_locations(frame_rgb, model="hog")
-    if not face_locations:
-        return []
-
-    face_encodings = face_recognition.face_encodings(frame_rgb, face_locations)
 
     # Build known arrays
     known_encodings = []
     known_names = []
     for name, embeddings in db.items():
         for emb in embeddings:
-            known_encodings.append(emb)
+            known_encodings.append(np.array(emb))
             known_names.append(name)
 
-    results = []
-    for encoding, location in zip(face_encodings, face_locations):
-        distances = face_recognition.face_distance(known_encodings, encoding)
-        if len(distances) > 0:
-            best_idx = np.argmin(distances)
-            best_distance = distances[best_idx]
-            if best_distance <= FACE_MATCH_TOLERANCE:
-                match_name = known_names[best_idx]
-                confidence = 1.0 - best_distance
-                results.append((match_name, location, confidence))
-            else:
-                results.append(("Unknown", location, 0.0))
-        else:
-            results.append(("Unknown", location, 0.0))
-
-    return results
+    if FACE_BACKEND == "dlib":
+        face_locations = face_recognition.face_locations(frame_rgb, model="hog")
+        if not face_locations:
+            return []
+        face_encodings = face_recognition.face_encodings(frame_rgb, face_locations)
+        results = []
+        for encoding, location in zip(face_encodings, face_locations):
+            name, conf = _match_encoding(encoding, known_encodings, known_names)
+            results.append((name, location, conf))
+        return results
+    else:
+        locations, faces_raw, img_bgr = _opencv_detect_faces(frame_rgb)
+        if not locations:
+            return []
+        results = []
+        for loc, face_raw in zip(locations, faces_raw):
+            encoding = _opencv_encode_face(img_bgr, face_raw)
+            name, conf = _match_encoding(encoding, known_encodings, known_names)
+            results.append((name, loc, conf))
+        return results
 
 def draw_face_labels(frame_bgr, face_results):
     """Draw face recognition labels on a BGR frame."""
@@ -440,7 +535,10 @@ if FACE_RECOGNITION_AVAILABLE:
                 img = Image.open(cam_image).convert("RGB")
                 img_array = np.array(img)
                 # Verify face is detected before accepting
-                face_locs = face_recognition.face_locations(img_array, model="hog")
+                if FACE_BACKEND == "dlib":
+                    face_locs = face_recognition.face_locations(img_array, model="hog")
+                else:
+                    face_locs, _, _ = _opencv_detect_faces(img_array)
                 if len(face_locs) == 1:
                     st.session_state["webcam_captures"].append(img_array)
                     st.success(f"Captured! ({current_step + 1}/{len(ANGLE_GUIDES)})")
@@ -715,25 +813,26 @@ elif input_type == "Webcam":
             if not _known_encodings_webcam:
                 return []
 
-            face_locations = face_recognition.face_locations(frame_rgb, model="hog")
-            if not face_locations:
-                return []
-
-            face_encodings = face_recognition.face_encodings(frame_rgb, face_locations)
-
-            results = []
-            for encoding, location in zip(face_encodings, face_locations):
-                distances = face_recognition.face_distance(_known_encodings_webcam, encoding)
-                if len(distances) > 0:
-                    best_idx = np.argmin(distances)
-                    best_distance = distances[best_idx]
-                    if best_distance <= FACE_MATCH_TOLERANCE:
-                        results.append((_known_names_webcam[best_idx], location, 1.0 - best_distance))
-                    else:
-                        results.append(("Unknown", location, 0.0))
-                else:
-                    results.append(("Unknown", location, 0.0))
-            return results
+            if FACE_BACKEND == "dlib":
+                face_locations = face_recognition.face_locations(frame_rgb, model="hog")
+                if not face_locations:
+                    return []
+                face_encodings = face_recognition.face_encodings(frame_rgb, face_locations)
+                results = []
+                for encoding, location in zip(face_encodings, face_locations):
+                    name, conf = _match_encoding(encoding, _known_encodings_webcam, _known_names_webcam)
+                    results.append((name, location, conf))
+                return results
+            else:
+                locations, faces_raw, img_bgr = _opencv_detect_faces(frame_rgb)
+                if not locations:
+                    return []
+                results = []
+                for loc, face_raw in zip(locations, faces_raw):
+                    encoding = _opencv_encode_face(img_bgr, face_raw)
+                    name, conf = _match_encoding(encoding, _known_encodings_webcam, _known_names_webcam)
+                    results.append((name, loc, conf))
+                return results
 
         def _draw_face_labels(self, frame, face_results):
             """Draw face labels on frame."""

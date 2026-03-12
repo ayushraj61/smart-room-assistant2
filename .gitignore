@@ -6,3 +6,4 @@ snapshots/
 *.onnx
 temp_video.*
 *.tmp
+face_models/
