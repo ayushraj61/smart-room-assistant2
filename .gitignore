@@ -1,0 +1,8 @@
+__pycache__/
+*.mp3
+.DS_Store
+snapshots/
+*.pt
+*.onnx
+temp_video.*
+*.tmp
