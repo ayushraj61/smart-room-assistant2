@@ -7,5 +7,5 @@ pandas>=1.5.3
 av>=10.0.0
 numpy<2.0
 lapx>=0.5.2
-face_recognition>=1.3.0
-dlib>=19.24.0
+# face_recognition and dlib are optional (require Python <=3.12)
+# Install locally: pip install face_recognition dlib

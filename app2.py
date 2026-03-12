@@ -13,7 +13,11 @@ from ultralytics import YOLO
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
 import av
 from collections import defaultdict
-import face_recognition
+try:
+    import face_recognition
+    FACE_RECOGNITION_AVAILABLE = True
+except ImportError:
+    FACE_RECOGNITION_AVAILABLE = False
 
 # ─── Page Config ───
 st.set_page_config(page_title="Smart Room Assistant", layout="wide")
@@ -185,9 +189,12 @@ frame_skip = st.sidebar.slider("Frame Skip (process every Nth)", 1, 10, 2,
 enable_tracking = st.sidebar.checkbox("Object Tracking (BoT-SORT)", value=True,
                                        help="Track objects across frames with persistent IDs.")
 
-st.sidebar.subheader("Face Recognition")
-enable_face_recognition = st.sidebar.checkbox("Enable Face Recognition", value=True,
-                                               help="Recognize registered faces when 'person' is detected.")
+if FACE_RECOGNITION_AVAILABLE:
+    st.sidebar.subheader("Face Recognition")
+    enable_face_recognition = st.sidebar.checkbox("Enable Face Recognition", value=True,
+                                                   help="Recognize registered faces when 'person' is detected.")
+else:
+    enable_face_recognition = False
 
 # Load model
 model = load_model(model_size, use_onnx)
@@ -389,7 +396,11 @@ def log_detections(detections, timestamp, face_results=None):
 # ══════════════════════════════════════════════
 # FACE REGISTRATION UI (in sidebar expander)
 # ══════════════════════════════════════════════
-with st.sidebar.expander("Register / Manage Faces", expanded=False):
+if not FACE_RECOGNITION_AVAILABLE:
+    st.sidebar.info("Face recognition is not available (dlib/face_recognition not installed).")
+
+if FACE_RECOGNITION_AVAILABLE:
+  with st.sidebar.expander("Register / Manage Faces", expanded=False):
     reg_name = st.text_input("Person's Name", key="face_reg_name")
 
     reg_method = st.radio("Registration Method", ["Upload Photos", "Webcam Capture"], key="reg_method", horizontal=True)
