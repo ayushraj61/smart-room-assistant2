@@ -22,7 +22,7 @@ st.title("Smart Room Assistant - YOLOv8")
 # ─── Constants ───
 FACES_DIR = "faces"
 FACE_DB_FILE = os.path.join(FACES_DIR, "face_db.json")
-FACE_MATCH_TOLERANCE = 0.6
+FACE_MATCH_TOLERANCE = 0.45
 
 # ─── Model Loading (cached, loads only once) ───
 @st.cache_resource
@@ -872,15 +872,29 @@ elif input_type == "Webcam":
         async_processing=True,
     )
 
-    # Sync webcam detections to session state
+    # Live sync webcam detections to session state
+    live_log_placeholder = st.empty()
     if ctx.state.playing:
-        with YOLOProcessor.detection_lock:
-            for entry in YOLOProcessor.detection_log:
-                # Avoid duplicating into session state
-                if entry not in st.session_state["detections"]:
-                    st.session_state["detections"].append(entry)
-    elif not ctx.state.playing and YOLOProcessor.detection_log:
-        # Stream stopped — flush remaining logs
+        import time as _time
+        while ctx.state.playing:
+            with YOLOProcessor.detection_lock:
+                for entry in YOLOProcessor.detection_log:
+                    if entry not in st.session_state["detections"]:
+                        st.session_state["detections"].append(entry)
+                YOLOProcessor.detection_log.clear()
+            if st.session_state["detections"]:
+                _df = pd.DataFrame(st.session_state["detections"])
+                with live_log_placeholder.container():
+                    st.markdown("### Live Detection Log")
+                    st.markdown(f"**Total detections:** {len(_df)} | **Unique objects:** {_df['object'].nunique()}")
+                    if "identity" in _df.columns:
+                        identified = _df[_df["identity"] != "-"]
+                        if not identified.empty:
+                            st.markdown(f"**Identified persons:** {', '.join(identified['identity'].unique())}")
+                    st.dataframe(_df, use_container_width=True)
+            _time.sleep(2)
+    # Stream stopped — flush remaining logs
+    if not ctx.state.playing and YOLOProcessor.detection_log:
         with YOLOProcessor.detection_lock:
             for entry in YOLOProcessor.detection_log:
                 if entry not in st.session_state["detections"]:
